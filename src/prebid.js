@@ -7,7 +7,6 @@ import 'polyfill';
 import {parse as parseURL, format as formatURL} from './url';
 import {isValidePriceConfig} from './cpmBucketManager';
 import {listenMessagesFromCreative} from './secure-creatives';
-import { loadScript } from './adloader';
 
 var $$PREBID_GLOBAL$$ = getGlobal();
 var CONSTANTS = require('./constants.json');
@@ -15,6 +14,7 @@ var utils = require('./utils.js');
 var bidmanager = require('./bidmanager.js');
 var adaptermanager = require('./adaptermanager');
 var bidfactory = require('./bidfactory');
+var adloader = require('./adloader');
 var events = require('./events');
 var adserver = require('./adserver.js');
 var targeting = require('./targeting.js');
@@ -293,17 +293,16 @@ $$PREBID_GLOBAL$$.renderAd = function (doc, id) {
       if (adObject) {
         //save winning bids
         $$PREBID_GLOBAL$$._winningBids.push(adObject);
-
         //emit 'bid won' event here
         events.emit(BID_WON, adObject);
 
-        const { height, width, ad, mediaType } = adObject;
-        const url = adObject.adUrl;
+        var height = adObject.height;
+        var width = adObject.width;
+        var url = adObject.adUrl;
+        var ad = adObject.ad;
 
-        if (doc === document) {
+        if (doc === document || adObject.mediaType === 'video') {
           utils.logError(`Error trying to write ad. Ad render call ad id ${id} was prevented from writing to the main document.`);
-        } else if (mediaType === 'video' || mediaType === 'video-outstream') {
-          performRenderViaRenderer(doc, adObject);
         } else if (ad) {
           if (isSrcdocSupported(doc)) {
             doc.defaultView.frameElement.srcdoc = ad;
@@ -311,7 +310,6 @@ $$PREBID_GLOBAL$$.renderAd = function (doc, id) {
             doc.write(ad);
             doc.close();
           }
-
           setRenderSize(doc, width, height);
         } else if (url) {
           doc.write(`<IFRAME SRC="${url}" FRAMEBORDER="0" SCROLLING="no" MARGINHEIGHT="0" MARGINWIDTH="0" TOPMARGIN="0" LEFTMARGIN="0" ALLOWTRANSPARENCY="true" WIDTH="${width}" HEIGHT="${height}"></IFRAME>`);
@@ -333,38 +331,6 @@ $$PREBID_GLOBAL$$.renderAd = function (doc, id) {
   }
 
 };
-
-const renderOutstream = function(renderFn, adObject) {
-  // collapse DFP div
-  document.getElementById(adObject.adUnitCode).firstChild.style.display = 'none';
-
-  // collapse ad unit div
-  document.getElementById(adObject.adUnitCode).style.display = 'none';
-
-  // call the render function
-  adObject.adResponse.ad = adObject.adResponse.ads[0];
-  adObject.adResponse.ad.video = adObject.adResponse.ad.rtb.video;
-  renderFn({
-    tagId: adObject.adResponse.tag_id,
-    sizes: [adObject.getSize().split('x')],
-    targetId: adObject.adUnitCode, // target div id to render video
-    uuid: adObject.adResponse.uuid, // is this the correct UUID
-    adResponse: adObject.adResponse
-  });
-};
-
-function performRenderViaRenderer(doc, adObject) {
-  window.apntag = { debug: true };
-  window.apntag.registerRenderer = function(id, cb) {
-    renderOutstream(cb.renderAd, adObject);
-  };
-
-  // use renderer defined by creative or default to ANOutstreamVideo.js
-  loadScript(
-    adObject.rendererUrl ||
-    'http://cdn.adnxs.com/renderer/video/ANOutstreamVideo.js'
-  );
-}
 
 /**
  * Remove adUnit from the $$PREBID_GLOBAL$$ configuration
@@ -625,7 +591,7 @@ $$PREBID_GLOBAL$$.addBidResponse = function (adUnitCode, bid) {
  */
 $$PREBID_GLOBAL$$.loadScript = function (tagSrc, callback, useCache) {
   utils.logInfo('Invoking $$PREBID_GLOBAL$$.loadScript', arguments);
-  loadScript(tagSrc, callback, useCache);
+  adloader.loadScript(tagSrc, callback, useCache);
 };
 
 /**
